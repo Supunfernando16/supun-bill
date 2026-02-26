@@ -1,5 +1,5 @@
 {
-    "name": "@mr-supun-fernando/supunmd-bail",
+    "name": "supunmd-bail",
     "version": "2.2.1",
     "description": "WhatsApp API Modification By Supun Fernando",
     "keywords": [
@@ -19,9 +19,9 @@
         "ds-modz",
         "wa-bot"
     ],
-    "homepage": "https://www.npmjs.com/package/@mr-supun-fernando",
+    "homepage": "https://www.npmjs.com/package/mr-supun-fernando",
     "repository": {
-        "url": "https://www.npmjs.com/package/@mr-supun-fernando/supunmd-bail"
+        "url": "https://www.npmjs.com/package/mr-supun-fernando/supunmd-bail"
     },
     "license": "MIT",
     "author": "Supun Fernando",
