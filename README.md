@@ -415,7 +415,7 @@ await sock.sendMessage(jid, {
     interactiveMessage: {
         header: "Hello World",
         title: "Hello World",
-        footer: "telegram: @pantatBegetar",
+        footer: "Powered by @SupunFernando",
         document: fs.readFileSync("./package.json"),
         mimetype: "application/pdf",
         fileName: "pantatBegetar.pdf",
@@ -458,7 +458,7 @@ await sock.sendMessage(jid, {
     interactiveMessage: {
         header: "Hello World",
         title: "Hello World",
-        footer: "telegram: @pantatBegetar",
+        footer: "Powered by @SupunFernando",
         document: fs.readFileSync("./package.json"),
         mimetype: "application/pdf",
         fileName: "pantatBegetar.pdf",
