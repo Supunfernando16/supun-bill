@@ -73,7 +73,9 @@ const { default: makeWASocket } = require('@mr-supun-fernando/supunmd-bail')
 ## 📖 Quick Start
 
 1. **Initialize the Socket**:
-   ```javascript
+
+```javascript
+
   import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@mr-supun-fernando/supunmd-bail'
 
    const startSock = async () => {
