@@ -36,12 +36,12 @@ This library is highly suitable for building business bots, chat automation syst
 
 ### NPM
 ```bash
-npm install @mr-supun-fernando/supunmd-bail
+npm install supunmd-bail
 ```
 
 ### Yarn
 ```bash
-yarn add @mr-supun-fernando/supunmd-bail
+yarn add supunmd-bail
 ```
 
 ### Using Different Package Name
@@ -49,7 +49,7 @@ Add to your `package.json`:
 ```json
 {
   "dependencies": {
-    "@whiskeysockets/baileys": "npm:@mr-supun-fernando/supunmd-bail"
+    "@whiskeysockets/baileys": "npm:supunmd-bail"
   }
 }
 ```
@@ -57,10 +57,10 @@ Add to your `package.json`:
 ### Import
 ```javascript
 // ESM
-import makeWASocket from '@mr-supun-fernando/supunmd-bail'
+import makeWASocket from 'supunmd-bail'
 
 // CommonJS
-const { default: makeWASocket } = require('@mr-supun-fernando/supunmd-bail')
+const { default: makeWASocket } = require('supunmd-bail')
 ```
 
 ---
