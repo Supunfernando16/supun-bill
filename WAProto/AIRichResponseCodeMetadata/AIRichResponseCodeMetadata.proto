@@ -1,0 +1,9 @@
+syntax = "proto3";
+package proto;
+
+/// WhatsApp Version: 2.3000.1037160418
+
+message AIRichResponseCodeMetadata {
+    optional string codeLanguage = 1;
+    repeated AIRichResponseCodeMetadata.IAIRichResponseCodeBlock codeBlocks = 2;
+}
