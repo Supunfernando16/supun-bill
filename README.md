@@ -56,7 +56,59 @@ Add to your `package.json`:
 }
 ```
 
-### Import
+
+## Import
+
+```js
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestWaWebVersion,
+  makeInMemoryStore,
+  Browsers,
+  getContentType,
+  downloadMediaMessage,
+  getAggregateVotesInPollMessage
+} = require('@mr-supun-fernando/supunmd-bail')
+```
+
+## Index
+
+- [Connecting Account](#connecting-account)
+- [Socket Config](#socket-config)
+- [Save Auth Info](#save-auth-info)
+- [Handling Events](#handling-events)
+- [Data Store](#data-store)
+- [WhatsApp IDs](#whatsapp-ids)
+- [Utility Functions](#utility-functions)
+- [Sending Messages](#sending-messages)
+- [Receiving Button Responses](#receiving-button-responses)
+- [Modify Messages](#modify-messages)
+- [Media Handling](#media-handling)
+- [Read Receipts](#read-receipts)
+- [Reject Call](#reject-call)
+- [Presence](#presence)
+- [Chat Modification](#chat-modification)
+- [User Queries](#user-queries)
+- [Profile](#profile)
+- [Privacy Settings](#privacy-settings)
+- [Block / Unblock](#block--unblock)
+- [Groups](#groups)
+- [Community](#community)
+- [Newsletter / Channel](#newsletter--channel)
+- [Business Profile](#business-profile)
+- [Labels](#labels)
+- [Bot Features](#bot-features)
+- [New Message Types (WA 2.3000+)](#new-message-types-wa-23000)
+- [WAProto Sync & Auto-Update](#waproto-sync--auto-update)
+- [Call Link](#call-link)
+- [Custom WS Callbacks](#custom-ws-callbacks)
+- [Maintenance Mode](#maintenance-mode)
+- [Feature Comparison](#feature-comparison)
+
+---
+
 ```javascript
 // ESM
 import makeWASocket from '@mr-supun-fernando/supunmd-bail'
@@ -70,442 +122,2403 @@ const { default: makeWASocket } = require('@mr-supun-fernando/supunmd-bail')
 
 <details>
 
+<summary><strong>## Connecting Account</strong></summary>
+
+### QR Code
+
+```js
+const { default: makeWASocket, Browsers } = require('@mr-supun-fernando/supunmd-bail')
+
+const sock = makeWASocket({
+  browser: Browsers.windows('supunbail'),
+  printQRInTerminal: true
+})
+```
+
+### Pairing Code
+
+```js
+const sock = makeWASocket({ printQRInTerminal: false })
+
+if (!sock.authState.creds.registered) {
+  const code = await sock.requestPairingCode('947xxxxxxxx')
+  console.log('Pairing code:', code)
+}
+```
+---
+
+### Full History Sync
+
+```js
+const sock = makeWASocket({
+  browser: Browsers.windows('Desktop'),
+  syncFullHistory: true
+})
+```
+
+### Auto Browser Detection
+
+```js
+const sock = makeWASocket({
+  browser: Browsers.appropriate('supunbail')
+})
+```
+
+### Auto-Reconnect
+
+```js
+const { Boom } = require('@hapi/boom')
+
+sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
+  if (connection === 'close') {
+    const shouldReconnect = (lastDisconnect?.error instanceof Boom)
+      ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
+      : true
+    if (shouldReconnect) connectToWhatsApp()
+  }
+})
+```
+
+---
+
+## Socket Config
+
+```js
+const NodeCache = require('@cacheable/node-cache')
+const groupCache = new NodeCache({ stdTTL: 5 * 60, useClones: false })
+
+const sock = makeWASocket({
+  auth: state,
+  browser: Browsers.windows('supunbail'),
+  countryCode: 'US', // ISO 3166-1 alpha-2 (auto MCC fallback when mcc is not set)
+  // mcc: '310', // optional explicit MCC override
+  printQRInTerminal: true,
+  syncFullHistory: false,
+  markOnlineOnConnect: false,
+  generateMessageID: () => require('crypto').randomBytes(16).toString('hex').toUpperCase(),
+  cachedGroupMetadata: async (jid) => groupCache.get(jid),
+  getMessage: async (key) => {
+    const msg = await store.loadMessage(key.remoteJid, key.id)
+    return msg?.message || undefined
+  },
+  linkPreviewImageThumbnailWidth: 192,
+  generateHighQualityLinkPreview: true,
+  enableRecentMessageCache: true,
+  maxMsgRetryCount: 5,
+  logger: require('pino')({ level: 'silent' })
+})
+
+sock.ev.on('groups.update', async ([event]) => {
+  const metadata = await sock.groupMetadata(event.id)
+  groupCache.set(event.id, metadata)
+})
+sock.ev.on('group-participants.update', async (event) => {
+  const metadata = await sock.groupMetadata(event.id)
+  groupCache.set(event.id, metadata)
+})
+```
+
+`countryCode` now automatically resolves the user-agent MCC from the built-in phone-number MCC table when `mcc` is not explicitly provided.  
+If you need a specific carrier/region MCC, set `mcc` manually.
+If both `countryCode` and `mcc` are omitted, the fallback MCC defaults to `000` (with default country behavior using `US` internally).
+
+---
+
+## Save Auth Info
+
+```js
+const { useMultiFileAuthState } = require('@mr-supun-fernando/supunmd-bail')
+
+async function connectToWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState('auth_info')
+  const { version, isLatest } = await fetchLatestWaWebVersion()
+
+  const sock = makeWASocket({ version, auth: state, printQRInTerminal: true })
+
+  sock.ev.on('creds.update', saveCreds)
+}
+connectToWhatsApp()
+```
+
+---
+
+## Handling Events
+
+```js
+sock.ev.on('connection.update', ({ connection, lastDisconnect, qr, isOnline }) => {
+  console.log('Connection:', connection, '| Online:', isOnline)
+})
+
+sock.ev.on('messages.upsert', async ({ messages, type }) => {
+  if (type !== 'notify') return
+  for (const msg of messages) {
+    console.log('New message from', msg.key.remoteJid)
+  }
+})
+
+sock.ev.on('messages.update', (updates) => {
+  for (const { key, update } of updates) {
+    if (update.status) console.log('Status:', update.status)
+  }
+})
+
+sock.ev.on('messages.delete', (item) => console.log('Deleted:', item))
+
+sock.ev.on('message.reaction', ({ key, reaction }) => {
+  console.log('Reaction', reaction.text, 'on', key.id)
+})
+
+sock.ev.on('chats.upsert', (chats) => console.log('Upsert', chats.length, 'chats'))
+sock.ev.on('chats.update', (updates) => console.log('Chat updates:', updates))
+sock.ev.on('chats.delete', (ids) => console.log('Chats deleted:', ids))
+
+sock.ev.on('groups.update', (updates) => {
+  for (const u of updates) console.log('Group updated:', u.id, u.subject)
+})
+sock.ev.on('group-participants.update', ({ id, participants, action }) => {
+  console.log(action, 'in', id, ':', participants)
+})
+
+sock.ev.on('contacts.upsert', (contacts) => {
+  for (const c of contacts) console.log('Contact:', c.id, c.notify)
+})
+
+sock.ev.on('presence.update', ({ id, presences }) => {
+  for (const [participant, presence] of Object.entries(presences)) {
+    console.log(participant, 'is', presence.lastKnownPresence)
+  }
+})
+
+sock.ev.on('call', (calls) => {
+  for (const call of calls) console.log('Call from', call.from, 'status:', call.status)
+})
+```
+
+### Decrypt Poll Votes
+
+```js
+const { getAggregateVotesInPollMessage } = require('@mr-supun-fernando/supunmd-bail')
+
+sock.ev.on('messages.update', async (event) => {
+  for (const { key, update } of event) {
+    if (update.pollUpdates) {
+      const pollCreation = await store.loadMessage(key.remoteJid, key.id)
+      if (pollCreation) {
+        const votes = getAggregateVotesInPollMessage({
+          message: pollCreation.message,
+          pollUpdates: update.pollUpdates
+        })
+        console.log('Poll results:', votes)
+      }
+    }
+  }
+})
+```
+
+---
+
+## Data Store
+
+```js
+const { makeInMemoryStore } = require('@mr-supun-fernando/supunmd-bail')
+
+const store = makeInMemoryStore({})
+store.readFromFile('./baileys_store.json')
+setInterval(() => store.writeToFile('./baileys_store.json'), 10_000)
+
+store.bind(sock.ev)
+
+const msg = await store.loadMessage('947xxx@s.whatsapp.net', 'MESSAGE_ID')
+const chats = store.chats.all()
+```
+
+---
+
+## WhatsApp IDs
+
+```
+User JID   : [country][number]@s.whatsapp.net
+Group JID  : [creator]-[timestamp]@g.us
+Community  : [id]@g.us
+Newsletter : [id]@newsletter
+LID        : Modern identity-based identifier
+```
+
+```js
+const {
+  jidDecode,
+  jidNormalizedUser,
+  jidEncode,
+  isJidGroup,
+  isJidNewsletter,
+  isJidUser,
+  areJidsSameUser
+} = require('@mr-supun-fernando/supunmd-bail')
+
+const { user, server, device } = jidDecode('947xxx@s.whatsapp.net')
+const normalized = jidNormalizedUser('947xxx:10@s.whatsapp.net')
+const jid = jidEncode('947xxx', 's.whatsapp.net')
+
+isJidGroup('xxxx-xxxx@g.us')
+isJidNewsletter('xxx@newsletter')
+isJidUser('947xxx@s.whatsapp.net')
+areJidsSameUser('947xxx@s.whatsapp.net', '947xxx:5@s.whatsapp.net')
+```
+
+---
+
+</details>
+
+<details>
+
 <summary><strong>Click to expand: Bailey Some Usage Things</strong></summary>
 
+## WhatsApp IDs
 
-## 📖 Quick Start
-
-1. **Initialize the Socket**:
-
-```javascript
-
-  import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@mr-supun-fernando/supunmd-bail'
-
-   const startSock = async () => {
-     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-     const sock = makeWASocket({
-       auth: state,
-       browser: ['SupunMd', 'Chrome', '1.0.0'],
-       printQRInTerminal: true, // Set to false for custom QR handling
-       syncFullHistory: false, // Optimize for production
-     });
-
-     sock.ev.on('creds.update', saveCreds);
-
-     sock.ev.on('connection.update', (update) => {
-       const { connection, lastDisconnect } = update;
-       if (connection === 'close') {
-         const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-         console.log('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
-         if (shouldReconnect) startSock(); // Auto-reconnect
-       } else if (connection === 'open') {
-         console.log('✅ Connected to WhatsApp');
-       }
-     });
-
-     return sock;
-   };
-
-   const sock = await startSock();
-   ```
-
-2. **Send a Basic Message**:
-   ```javascript
-   const jid = 'recipient@s.whatsapp.net';
-   await sock.sendMessage(jid, { text: 'Hello from SupunMd!' });
-   ```
-
----
-
-| Category | Description |
-|---|---|
-|channels | Seamlessly send messages to WhatsApp Channels. |
-| 🖱️ Buttons | Create interactive messages with button options and quick replies. |
-| 🖼️ Albums | Send grouped images or videos as an album (carousel-like format). |
-| 👤 LID Grouping | Handle group operations using the latest @lid addressing style. |
-| 🤖 AI Message Style | Add a stylized “AI” icon to messages. |
-| 📷 HD Profile Pics | Upload full-size profile pictures without cropping. |
-| 🔐 Pairing Code | Generate custom alphanumeric pairing codes. |
-| 🛠️ Dev Experience | Reduced noise from logs with optimized libsignal printouts. |
-
----
-
-## 🔧 API Reference
-
-### Utility Functions
-
-## 🚀 Features & Usage
-
-### 📬 Newsletter Control
-Manage WhatsApp Newsletters (Channels), from creation to message interactions.
+```
+User JID   : [country][number]@s.whatsapp.net
+Group JID  : [creator]-[timestamp]@g.us
+Community  : [id]@g.us
+Newsletter : [id]@newsletter
+LID        : Modern identity-based identifier
+```
 
 ```js
-// Create a newsletter
-await sock.newsletterCreate("SupunMd Update");
+const {
+  jidDecode,
+  jidNormalizedUser,
+  jidEncode,
+  isJidGroup,
+  isJidNewsletter,
+  isJidUser,
+  areJidsSameUser
+} = require('@mr-supun-fernando/supunmd-bail')
 
-// Update description
-await sock.newsletterUpdateDescription(
-  "1234XXXX@newsletter",
-  "YOO updates come daily"
-);
+const { user, server, device } = jidDecode('947xxx@s.whatsapp.net')
+const normalized = jidNormalizedUser('947xxx:10@s.whatsapp.net')
+const jid = jidEncode('947xxx', 's.whatsapp.net')
 
-// React to a channel message
-await sock.newsletterReactMessage(
-  "1234XXXX@newsletter",
-  "192",
-  "💜"
-);
+isJidGroup('xxxx-xxxx@g.us')
+isJidNewsletter('xxx@newsletter')
+isJidUser('947xxx@s.whatsapp.net')
+areJidsSameUser('947xxx@s.whatsapp.net', '947xxx:5@s.whatsapp.net')
 ```
 
 ---
 
-### Custom Pairing Code
-```javascript
-const phoneNumber = "947XXXXX"
-const code = await sock.requestPairingCode(phoneNumber.trim(), "ABCDE01")
-console.log("Your pairing code: " + code)
-```
-
----
-
-### 📌 Interactive Messaging
-Send interactive messages using buttons to increase user engagement.
+## Utility Functions
 
 ```js
-const buttons = [
-  { buttonId: "btn1", buttonText: { displayText: "Click Me" }, type: 1 },
-  { buttonId: "btn2", buttonText: { displayText: "Visit Site" }, type: 1 }
-];
+const {
+  getContentType,
+  downloadMediaMessage,
+  generateMessageID,
+  normalizeMessageContent,
+  extractMessageContent
+} = require('@mr-supun-fernando/supunmd-bail')
 
-await sock.sendMessage(id, {
-  text: "Choose one:",
-  footer: "Mova - Nest | Lk",
-  buttons,
-  headerType: 1
-});
+const type = getContentType(msg.message)
+const buffer = await downloadMediaMessage(msg, 'buffer', {})
+const stream = await downloadMediaMessage(msg, 'stream', {})
+const id = generateMessageID()
+const content = normalizeMessageContent(msg.message)
 ```
 
----
-
-### 🖼️ Send Album
-Send multiple media (images or videos) in a single album message.
+### Account Restriction Check
 
 ```js
-await sock.sendMessage(jid, { 
-    albumMessage: [
-        { image: { url: "https://example.com/pic1.jpg" }, caption: "Celon Memories" },
-        { image: { url: "https://example.com/pic1.jpg" }, caption: "Celon Memories" }
-    ] 
-}, { quoted: m });
-
+const restriction = await sock.checkAccountRestriction()
+console.log(restriction.isRestricted, restriction.reachoutTimelock, restriction.messageCap)
 ```
 
----
-
-### 🔐 Custom Pairing Code
-Pair a WhatsApp device using a custom code.
+### Audio Transcoding
 
 ```js
-const code = await sock.requestPairingCode("94XXXXXXXX","ABCDE123");
-console.log("Pairing Code:", code);
-```
-
----
-
-#### Event Message
-Invite users to virtual events with location and RSVP links.
-
-```javascript
-await sock.sendMessage(jid, { 
-    eventMessage: { 
-        isCanceled: false, 
-        name: "Technology Meetup 2026", 
-        description: "Join us for AI innovations!", 
-        location: { 
-            degreesLatitude: 0, 
-            degreesLongitude: 0, 
-            name: "SUPUN MD" 
-        }, 
-        joinLink: "https://call.whatsapp.com/video/event123", 
-        startTime: "1763019000", 
-        endTime: "1763026200", 
-        extraGuestsAllowed: false 
-    } 
-}, { quoted: m });
-```
-
-#### Poll Result Message
-Share poll outcomes with vote tallies.
-
-```javascript
-await sock.sendMessage(jid, { 
-    pollResultMessage: { 
-        name: "Hello World", 
-        pollVotes: [
-            {
-                optionName: "TEST 1",
-                optionVoteCount: "112233"
-            },
-            {
-                optionName: "TEST 2",
-                optionVoteCount: "1"
-            }
-        ] 
-    } 
-}, { quoted: m });
-```
-
-#### Simple Interactive Message
-Engage with copyable CTAs.
-
-```javascript
 await sock.sendMessage(jid, {
-    interactiveMessage: {
-        header: 'Quick Action',
-        title: 'Copy this code',
-        footer: 'Powered by @SupunFernando',
-        buttons: [
-            {
-                name: "cta_copy",
-                buttonParamsJson: JSON.stringify({
-                    display_text: "copy code",
-                    id: "123456789",              
-                    copy_code: "ABC123XYZ"
-                })
-            }
-        ]
+  audio: { url: 'https://example.com/voice.mp3' },
+  mimetype: 'audio/ogg; codecs=opus',
+  ptt: true
+}, {
+  transcodeAudio: true,
+  audioBitrate: '64k'
+})
+```
+
+---
+
+## Sending Messages
+
+### Text
+
+```js
+await sock.sendMessage(jid, { text: 'Hello World!' })
+
+await sock.sendMessage(jid, {
+  text: '*bold* _italic_ ~strikethrough~ ```monospace```'
+})
+
+await sock.sendMessage(jid, {
+  text: 'Check https://supunmd.vercel.app'
+})
+
+await sock.sendMessage(jid, { text: 'No preview', linkPreview: null })
+```
+
+### Quote / Reply
+
+```js
+await sock.sendMessage(jid, { text: 'Reply!' }, { quoted: msg })
+```
+
+### Mention Users
+
+```js
+await sock.sendMessage(jid, {
+  text: 'Hello @947xxx and @947xxx!',
+  mentions: ['947xxx@s.whatsapp.net', '947xx@s.whatsapp.net']
+})
+```
+
+### Image
+
+```js
+await sock.sendMessage(jid, {
+  image: { url: 'https://example.com/photo.jpg' },
+  caption: 'Caption'
+})
+
+const fs = require('fs')
+await sock.sendMessage(jid, {
+  image: fs.readFileSync('./photo.jpg'),
+  caption: 'From file'
+})
+
+await sock.sendMessage(jid, {
+  image: Buffer.from('<base64_string>', 'base64'),
+  caption: 'Base64'
+})
+```
+
+### Video
+
+```js
+await sock.sendMessage(jid, {
+  video: { url: 'https://example.com/video.mp4' },
+  caption: 'Video'
+})
+
+await sock.sendMessage(jid, {
+  video: { url: 'https://example.com/animation.mp4' },
+  gifPlayback: true
+})
+```
+
+### Audio / PTT
+
+```js
+await sock.sendMessage(jid, {
+  audio: { url: 'https://example.com/audio.mp3' },
+  mimetype: 'audio/mp4'
+})
+
+await sock.sendMessage(jid, {
+  audio: { url: 'https://example.com/voice.ogg' },
+  mimetype: 'audio/ogg; codecs=opus',
+  ptt: true
+})
+```
+
+### PTV
+
+```js
+await sock.sendMessage(jid, {
+  video: { url: 'https://example.com/clip.mp4' },
+  ptv: true
+})
+```
+
+### Document
+
+```js
+await sock.sendMessage(jid, {
+  document: { url: 'https://example.com/file.pdf' },
+  mimetype: 'application/pdf',
+  fileName: 'report.pdf',
+  caption: 'Monthly report'
+})
+```
+
+### Sticker
+
+```js
+await sock.sendMessage(jid, {
+  sticker: { url: 'https://example.com/sticker.webp' }
+})
+
+await sock.sendMessage(jid, {
+  sticker: fs.readFileSync('./sticker.tgs'),
+  isLottie: true
+})
+```
+
+### Sticker Pack
+
+```js
+// option 1
+await sock.sendMessage(jid, {
+  stickerPack: {
+    stickerPackId: 'your-pack-id',
+    name: 'My Sticker Pack',
+    publisher: 'My Brand',
+    stickers: [
+      { stickerId: 'sticker-1', fileName: 'sticker1.webp', emoticon: '🔥' },
+      { stickerId: 'sticker-2', fileName: 'sticker2.webp', emoticon: '✨' }
+    ],
+    packDescription: 'Sample sticker pack'
+  }
+})
+
+// option 2 (alias)
+await sock.sendMessage(jid, {
+  stickerPackMessage: {
+    stickerPackId: 'your-pack-id',
+    name: 'My Sticker Pack',
+    publisher: 'My Brand',
+    stickers: [
+      { stickerId: 'sticker-1', fileName: 'sticker1.webp', emoticon: '🔥' }
+    ],
+    packDescription: 'Sample sticker pack'
+  }
+})
+```
+
+> Note: `stickerPack` and `stickerPackMessage` are aliases. Use only one in a single message.
+
+### Contact Card
+
+```js
+await sock.sendMessage(jid, {
+  contacts: {
+    displayName: 'John Doe',
+    contacts: [
+      {
+        vcard: `BEGIN:VCARD
+VERSION:3.0
+FN:John Doe
+TEL;type=CELL;type=VOICE;waid=628111111111:+62 811-1111-1111
+END:VCARD`
+      }
+    ]
+  }
+})
+
+await sock.sendMessage(jid, {
+  contacts: {
+    displayName: '2 Contacts',
+    contacts: [
+      { vcard: 'BEGIN:VCARD\nVERSION:3.0\nFN:Alice\nTEL;waid=628111111111:+62811\nEND:VCARD' },
+      { vcard: 'BEGIN:VCARD\nVERSION:3.0\nFN:Bob\nTEL;waid=628222222222:+62822\nEND:VCARD' }
+    ]
+  }
+})
+```
+
+### Location
+
+```js
+await sock.sendMessage(jid, {
+  location: {
+    degreesLatitude: -6.2088,
+    degreesLongitude: 106.8456,
+    name: 'Jakarta, Indonesia',
+    address: 'DKI Jakarta, Indonesia'
+  }
+})
+```
+
+### Live Location
+
+```js
+await sock.sendMessage(jid, {
+  liveLocation: {
+    degreesLatitude: -6.2088,
+    degreesLongitude: 106.8456,
+    accuracyInMeters: 10,
+    speedInMps: 0,
+    degreesClockwiseFromMagneticNorth: 0,
+    sequenceNumber: BigInt(Date.now()),
+    timeSinceLastUpdate: 0
+  },
+  caption: 'Live location'
+})
+```
+
+### Poll
+
+```js
+await sock.sendMessage(jid, {
+  poll: {
+    name: 'Favorite color?',
+    values: ['Red', 'Green', 'Blue'],
+    selectableCount: 1
+  }
+})
+
+await sock.sendMessage(jid, {
+  poll: {
+    name: 'Select hobbies:',
+    values: ['Gaming', 'Reading', 'Coding'],
+    selectableCount: 0
+  }
+})
+```
+
+### Reaction
+
+```js
+await sock.sendMessage(jid, { react: { text: 'ok', key: msg.key } })
+
+await sock.sendMessage(jid, { react: { text: '', key: msg.key } })
+```
+
+### List Message
+
+```js
+await sock.sendMessage(jid, {
+  title: 'Order Menu',
+  text: 'Please select from the options below:',
+  footer: '@Supun-Fernando',
+  buttonText: 'Open Menu',
+  sections: [
+    {
+      title: 'Main Course',
+      rows: [
+        { title: 'Pizza', description: 'Classic tomato', rowId: 'pizza'  },
+        { title: 'Burger', description: 'Double beef',   rowId: 'burger' }
+      ]
+    },
+    {
+      title: 'Drinks',
+      rows: [
+        { title: 'Cola',   description: '500ml',          rowId: 'cola'  },
+        { title: 'Juice',  description: 'Fresh squeezed', rowId: 'juice' }
+      ]
     }
-}, { quoted: m });
+  ]
+})
+
+await sock.sendMessage(jid, {
+  listMessage: {
+    title: 'Order Menu',
+    description: 'Please select from the options below:',
+    footerText: '@Supun-Fernando',
+    buttonText: 'Open Menu',
+    listType: 1,
+    sections: [
+      {
+        title: 'Food',
+        rows: [
+          { title: 'Fried Rice', description: 'Tasty', rowId: 'fried_rice' }
+        ]
+      }
+    ]
+  }
+})
 ```
 
-#### Advanced Interactive Message (Native Flow)
-Full native flows with lists, sheets, and offers.
+### Buttons Message
 
-```javascript
-await sock.sendMessage(jid, {    
-    interactiveMessage: {      
-        header: "Dynamic Menu",
-        title: "Explore Options",      
-        footer: "Contact @SupunFernando for support",      
-        image: { url: "https://example.com/image.jpg" },      
-        nativeFlowMessage: {        
-            messageParamsJson: JSON.stringify({          
-                limited_time_offer: {            
-                    text: "Exclusive deal ends soon!",            
-                    url: "https://whatsapp.com/channel/0029Vb55cv41nozBTTIw1y07",            
-                    copy_code: "DEAL2026",            
-                    expiration_time: Date.now() * 86400000          
-                },          
-                bottom_sheet: {            
-                    in_thread_buttons_limit: 2,            
-                    divider_indices: [1, 2, 3, 4, 5, 999],            
-                    list_title: "Categories",            
-                    button_title: "View All"          
-                },          
-                tap_target_configuration: {            
-                    title: "Learn More",            
-                    description: "Advanced automation tips",            
-                    canonical_url: "https://www.npmjs.com/package/mr-supun-fernando",            
-                    domain: "supunmd.vercel.com",            
-                    button_index: 0          
-                }        
-            }),        
-            buttons: [          
-                {            
-                    name: "single_select",            
-                    buttonParamsJson: JSON.stringify({              
-                        has_multiple_buttons: true            
-                    })          
-                },          
-                {            
-                    name: "call_permission_request",            
-                    buttonParamsJson: JSON.stringify({              
-                        has_multiple_buttons: true            
-                    })          
-                },          
-                {            
-                    name: "single_select",            
-                    buttonParamsJson: JSON.stringify({              
-                        title: "Hello World",              
-                        sections: [                
-                            {                  
-                                title: "title",                  
-                                highlight_label: "label",                  
-                                rows: [                    
-                                    {                      
-                                        title: "@SupunFernando",                      
-                                        description: "love you",                      
-                                        id: "row_2"                    
-                                    }                  
-                                ]                
-                            }              
-                        ],              
-                        has_multiple_buttons: true            
-                    })          
-                },          
-                {            
-                    name: "cta_copy",            
-                    buttonParamsJson: JSON.stringify({              
-                        display_text: "copy code",              
-                        id: "123456789",              
-                        copy_code: "ABC123XYZ"            
-                    })          
-                }        
-            ]      
-        }    
-    }  
-}, { quoted: m });
+```js
+await sock.sendMessage(jid, {
+  text: 'What would you like to do?',
+  footer: '@Supun-Fernando',
+  buttons: [
+    { buttonId: 'id1', buttonText: { displayText: 'View Menu'   } },
+    { buttonId: 'id2', buttonText: { displayText: 'Place Order' } },
+    { buttonId: 'id3', buttonText: { displayText: 'Help'        } }
+  ]
+})
+
+await sock.sendMessage(jid, {
+  image: { url: 'https://example.com/banner.jpg' },
+  caption: 'Choose an option:',
+  footer: '@Supun-Fernando',
+  buttons: [
+    { buttonId: 'yes', buttonText: { displayText: 'Yes' } },
+    { buttonId: 'no',  buttonText: { displayText: 'No'  } }
+  ]
+})
+
+// gifted-style shortcuts are also supported
+await sock.sendMessage(jid, {
+  text: 'Choose one',
+  buttons: [
+    { id: 'a', text: 'Option A' },
+    { id: 'b', displayText: 'Option B' },
+    { buttonId: 'c', buttonText: 'Option C' }
+  ]
+})
+
+// mixed: quick_reply + native flow (type 4 + nativeFlowInfo)
+await sock.sendMessage(jid, {
+  text: 'Hello World!',
+  footer: '@Supun-Fernando',
+  buttons: [
+    {
+      buttonId: 'ping',
+      buttonText: { displayText: 'Ping Bot' },
+      type: 1
+    },
+    {
+      buttonId: 'select',
+      buttonText: { displayText: 'Open Menu' },
+      type: 4,
+      nativeFlowInfo: {
+        name: 'single_select',
+        paramsJson: JSON.stringify({
+          title: 'Choose',
+          sections: [
+            {
+              title: 'Options',
+              highlight_label: '🔥',
+              rows: [
+                { header: 'A', title: 'Option A', description: 'First',  id: 'opt_a' },
+                { header: 'B', title: 'Option B', description: 'Second', id: 'opt_b' }
+              ]
+            }
+          ]
+        })
+      }
+    }
+  ],
+  viewOnce: true
+}, { quoted: msg })
+
+// buttons array also accepts already-normalized native flow objects
+await sock.sendMessage(jid, {
+  text: 'Actions',
+  footer: '@Supun-Fernando',
+  buttons: [
+    { name: 'quick_reply',   buttonParamsJson: JSON.stringify({ display_text: 'Yes', id: 'yes' }) },
+    { name: 'cta_url',       buttonParamsJson: JSON.stringify({ display_text: 'Open', url: 'https://supunmd.vercel.app', merchant_url: 'https://supunmd.vercel.app' }) },
+    { name: 'cta_copy',      buttonParamsJson: JSON.stringify({ display_text: 'Copy Code', id: 'code', copy_code: 'supunbail' }) }
+  ]
+})
+
+await sock.sendMessage(jid, {
+  buttonsMessage: {
+    contentText: 'Legacy buttons message',
+    footerText: '@Supun-Fernando',
+    buttons: [
+      { buttonId: 'legacy_1', buttonText: { displayText: 'Legacy 1' }, type: 1 },
+      { buttonId: 'legacy_2', buttonText: { displayText: 'Legacy 2' }, type: 1 }
+    ],
+    headerType: 1
+  }
+})
 ```
 
-#### Interactive Message with Thumbnail
-Rich previews for products/services.
+### Interactive Message
 
-```javascript
+```js
 await sock.sendMessage(jid, {
   interactiveMessage: {
-    header: { title: 'Featured Item' },
-    title: 'Supun Md',
-    footer: 'Upgrade today',
-    image: { url: 'https://example.com/product-thumb.jpg' },
+    header: { title: 'Quick Question', hasMediaAttachment: false },
+    body:   { text: 'Are you enjoying supunbail?' },
+    footer: { text: '@Supun-Fernando' },
+    nativeFlowMessage: {
+      buttons: [
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Yes!',    id: 'yes'   }) },
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Not yet', id: 'no'    }) },
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Maybe',   id: 'maybe' }) }
+      ],
+      messageParamsJson: ''
+    }
+  }
+})
+
+// PIX button — works on both WhatsApp Web and mobile
+await sock.sendMessage(jid, {
+  text: '',
+  interactiveButtons: [
+    {
+      name: 'payment_info',
+      buttonParamsJson: JSON.stringify({
+        payment_settings: [{
+          type: 'pix_static_code',
+          pix_static_code: {
+            merchant_name: 'Your Name',
+            key: 'example@email.com',
+            key_type: 'EMAIL' // PHONE | EMAIL | CPF | EVP
+          }
+        }]
+      })
+    }
+  ]
+})
+
+// PAY button — works on both WhatsApp Web and mobile
+await sock.sendMessage(jid, {
+  text: '',
+  interactiveButtons: [
+    {
+      name: 'review_and_pay',
+      buttonParamsJson: JSON.stringify({
+        currency: 'IDR',
+        payment_configuration: '',
+        payment_type: '',
+        total_amount: { value: '10000', offset: '100' },
+        reference_id: 'REF-001',
+        type: 'physical-goods',
+        payment_method: 'confirm',
+        payment_status: 'captured',
+        payment_timestamp: Math.floor(Date.now() / 1000),
+        order: {
+          status: 'completed',
+          description: '',
+          subtotal: { value: '0', offset: '100' },
+          order_type: 'PAYMENT_REQUEST',
+          items: [{
+            retailer_id: 'your_retailer_id',
+            name: 'Product Name',
+            amount: { value: '10000', offset: '100' },
+            quantity: '1'
+          }]
+        },
+        additional_note: 'Thank you',
+        native_payment_methods: [],
+        share_payment_status: false
+      })
+    }
+  ]
+})
+
+await sock.sendMessage(jid, {
+  interactiveMessage: {
+    header: { title: 'Visit Our Website', hasMediaAttachment: false },
+    body:   { text: 'Click the button below.' },
+    footer: { text: 'supunbail' },
+    nativeFlowMessage: {
+      buttons: [
+        {
+          name: 'cta_url',
+          buttonParamsJson: JSON.stringify({
+            display_text: 'Open Website',
+            url: 'https://supunmd.vercel.app',
+            merchant_url: 'https://supunmd.vercel.app'
+          })
+        }
+      ],
+      messageParamsJson: ''
+    }
+  }
+})
+
+await sock.sendMessage(jid, {
+  interactiveMessage: {
+    header: { title: 'Your Promo Code', hasMediaAttachment: false },
+    body:   { text: 'Use the promo code below for 20% off.' },
+    footer: { text: '@Supun-Fernando' },
+    nativeFlowMessage: {
+      buttons: [
+        {
+          name: 'cta_copy',
+          buttonParamsJson: JSON.stringify({
+            display_text: 'Copy Code',
+            id: 'promo_code',
+            copy_code: 'supunbail20'
+          })
+        }
+      ],
+      messageParamsJson: ''
+    }
+  }
+})
+
+await sock.sendMessage(jid, {
+  interactiveMessage: {
+    header: { title: 'Select a Plan', hasMediaAttachment: false },
+    body:   { text: 'Choose your subscription plan:' },
+    footer: { text: 'supunbail Services' },
+    nativeFlowMessage: {
+      buttons: [
+        {
+          name: 'single_select',
+          buttonParamsJson: JSON.stringify({
+            title: 'Available Plans',
+            sections: [
+              {
+                title: 'Plans',
+                rows: [
+                  { header: 'Free',    title: 'Free Plan',     description: 'Basic features', id: 'free'    },
+                  { header: 'Basic',   title: 'Basic - $5',    description: 'More features',  id: 'basic'   },
+                  { header: 'Premium', title: 'Premium - $20', description: 'All features',   id: 'premium' }
+                ]
+              }
+            ]
+          })
+        }
+      ],
+      messageParamsJson: ''
+    }
+  }
+})
+
+await sock.sendMessage(jid, {
+  interactiveMessage: {
+    header: { title: 'Special Offer', hasMediaAttachment: false },
+    body:   { text: 'Choose an action:' },
+    footer: { text: '@Supun-Fernando' },
+    nativeFlowMessage: {
+      buttons: [
+        {
+          name: 'cta_url',
+          buttonParamsJson: JSON.stringify({
+            display_text: 'Open Website',
+            url: 'https://supunmd.vercel.app',
+            merchant_url: 'https://supunmd.vercel.app'
+          })
+        },
+        {
+          name: 'cta_copy',
+          buttonParamsJson: JSON.stringify({ display_text: 'Copy Code', id: 'code', copy_code: 'supunbail50' })
+        },
+        {
+          name: 'quick_reply',
+          buttonParamsJson: JSON.stringify({ display_text: 'Continue', id: 'continue' })
+        }
+      ],
+      messageParamsJson: ''
+    }
+  }
+}, { quoted: msg })
+
+await sock.sendMessage(jid, {
+  interactiveMessage: {
+    header: {
+      title: 'Choose option',
+      hasMediaAttachment: true,
+      imageMessage: { url: 'https://example.com/banner.jpg', mimetype: 'image/jpeg' }
+    },
+    body:   { text: 'Choose:' },
+    footer: { text: '@Supun-Fernando' },
+    nativeFlowMessage: {
+      buttons: [
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Yes', id: 'yes' }) },
+        { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'No',  id: 'no'  }) }
+      ],
+      messageParamsJson: ''
+    }
+  }
+})
+
+await sock.sendMessage(jid, {
+  interactiveMessage: {
+    header: { title: 'Main Menu', hasMediaAttachment: false },
+    body:   { text: 'Please choose a menu:' },
+    footer: { text: '@Supun-Fernando' },
+    nativeFlowMessage: {
+      buttons: [
+        {
+          name: 'single_select',
+          buttonParamsJson: JSON.stringify({
+            title: 'Choose Category',
+            sections: [
+              {
+                title: 'Food',
+                rows: [
+                  { title: 'Fried Rice', description: 'Tasty', id: 'fried_rice' },
+                  { title: 'Chicken Noodles', description: 'Large', id: 'chicken_noodles' }
+                ]
+              }
+            ],
+            has_multiple_buttons: true
+          })
+        },
+        {
+          name: 'quick_reply',
+          buttonParamsJson: JSON.stringify({ display_text: 'Close', id: 'close', has_multiple_buttons: true })
+        }
+      ],
+      messageParamsJson: ''
+    }
+  }
+}, { quoted: msg })
+
+const fs = require('fs')
+await sock.sendMessage(jid, {
+  interactiveMessage: {
+    header: 'Important Document',
+    title: 'PDF File',
+    footer: '@Supun-Fernando',
+    document: fs.readFileSync('./file.pdf'),
+    mimetype: 'application/pdf',
+    fileName: 'document.pdf',
+    jpegThumbnail: fs.readFileSync('./thumb.jpg'),
+    contextInfo: {
+      mentionedJid: [jid],
+      forwardingScore: 777,
+      isForwarded: false
+    },
+    externalAdReply: {
+      title: 'Supun Md Bot',
+      body: 'Interactive bot',
+      mediaType: 3,
+      thumbnailUrl: 'https://example.com/thumb.jpg',
+      sourceUrl: 'https://supunmd.vercel.app',
+      showAdAttribution: true,
+      renderLargerThumbnail: false
+    },
     buttons: [
       {
-        name: 'cta_copy',
+        name: 'cta_url',
         buttonParamsJson: JSON.stringify({
-          display_text: 'copy code',
-          id: '123456789',
-          copy_code: 'ABC123XYZ'
+          display_text: 'Open Link',
+          url: 'https://supunmd.vercel.app',
+          merchant_url: 'https://supunmd.vercel.app'
         })
       }
     ]
   }
-}, { quoted: m });
-```
+}, { quoted: msg })
 
-#### Product Message
-E-commerce ready catalogs.
-
-```javascript
 await sock.sendMessage(jid, {
-    productMessage: {
-        title: "Produk Contoh",
-        description: "Ini adalah deskripsi produk",
-        thumbnail: { url: "https://example.com/image.jpg" },
-        productId: "PROD001",
-        retailerId: "RETAIL001",
-        url: "https://example.com/product",
-        body: "Detail produk",
-        footer: "Harga spesial",
-        priceAmount1000: 50000,
-        currencyCode: "USD",
-        buttons: [
-            {
-                name: "cta_url",
-                buttonParamsJson: JSON.stringify({
-                    display_text: "Beli Sekarang",
-                    url: "https://example.com/buy"
-                })
-            }
-        ]
-    }
-}, { quoted: m });
-```
-
-### Interactive Message with Document Buffer
-Send interactive messages with document from buffer (file system) - **Note: Documents only support buffer**:
-
-```javascript
-await sock.sendMessage(jid, {
-    interactiveMessage: {
-        header: "Hello World",
-        title: "Hello World",
-        footer: "Powered by @SupunFernando",
-        document: fs.readFileSync("./package.json"),
-        mimetype: "application/pdf",
-        fileName: "pantatBegetar.pdf",
-        jpegThumbnail: fs.readFileSync("./document.jpeg"),
-        contextInfo: {
-            mentionedJid: [jid],
-            forwardingScore: 777,
-            isForwarded: false
+  interactiveMessage: {
+    header: 'Hello World',
+    title: 'Hello World',
+    footer: '@supun-fernando',
+    image: { url: 'https://example.com/image.jpg' },
+    nativeFlowMessage: {
+      messageParamsJson: JSON.stringify({
+        limited_time_offer: {
+          text: 'Limited offer',
+          url: 'https://supunmd.vercel.app',
+          copy_code: 'supun-fernando',
+          expiration_time: Date.now() + 3600000
         },
-        externalAdReply: {
-            title: "Wabot",
-            body: "Z team",
-            mediaType: 3,
-            thumbnailUrl: "https://example.com/image.jpg",
-            mediaUrl: " X ",
-            sourceUrl: "https://t.me/pantatBegetar",
-            showAdAttribution: true,
-            renderLargerThumbnail: false         
-        },
-        buttons: [
-            {
-                name: "cta_url",
-                buttonParamsJson: JSON.stringify({
-                    display_text: "Telegram",
-                    url: "https://t.me/pantatBegetar",
-                    merchant_url: "https://t.me/pantatBegetar"
-                })
-            }
-        ]
-    }
-}, { quoted: m });
-```
-
-
-### Interactive Message with Document Buffer (Simple)
-Send interactive messages with document from buffer (file system) without contextInfo and externalAdReply - **Note: Documents only support buffer**:
-
-```javascript
-await sock.sendMessage(jid, {
-    interactiveMessage: {
-        header: "Hello World",
-        title: "Hello World",
-        footer: "Powered by @SupunFernando",
-        document: fs.readFileSync("./package.json"),
-        mimetype: "application/pdf",
-        fileName: "pantatBegetar.pdf",
-        jpegThumbnail: fs.readFileSync("./document.jpeg"),
-        buttons: [
-            {
-                name: "cta_url",
-                buttonParamsJson: JSON.stringify({
-                    display_text: "Telegram",
-                    url: "https://t.me/pantatBegetar",
-                    merchant_url: "https://t.me/pantatBegetar"
-                })
-            }
-        ]
-    }
-}, { quoted: m });
-```
-
-### Request Payment Message
-Send payment request messages with custom background and sticker:
-
-```javascript
-let quotedType = m.quoted?.mtype || '';
-let quotedContent = JSON.stringify({ [quotedType]: m.quoted }, null, 2);
-
-await sock.sendMessage(jid, {
-    requestPaymentMessage: {
-        currency: "IDR",
-        amount: 10000000,
-        from: m.sender,
-        sticker: JSON.parse(quotedContent),
-        background: {
-            id: "100",
-            fileLength: "0",
-            width: 1000,
-            height: 1000,
-            mimetype: "image/webp",
-            placeholderArgb: 0xFF00FFFF,
-            textArgb: 0xFFFFFFFF,     
-            subtextArgb: 0xFFAA00FF   
+        bottom_sheet: {
+          in_thread_buttons_limit: 2,
+          list_title: 'supun-fernando',
+          button_title: 'supun-fernando'
         }
+      }),
+      buttons: [
+        {
+          name: 'single_select',
+          buttonParamsJson: JSON.stringify({
+            title: 'Hello World',
+            sections: [
+              {
+                title: 'Options',
+                highlight_label: 'label',
+                rows: [
+                  { title: 'Option 1', description: 'First option', id: 'opt1' }
+                ]
+              }
+            ],
+            has_multiple_buttons: true
+          })
+        },
+        {
+          name: 'call_permission_request',
+          buttonParamsJson: JSON.stringify({ has_multiple_buttons: true })
+        },
+        {
+          name: 'cta_copy',
+          buttonParamsJson: JSON.stringify({ display_text: 'Copy Code', id: 'code', copy_code: 'supunbail' })
+        }
+      ]
     }
-}, { quoted: m });
+  }
+}, { quoted: msg })
 ```
+
+### Carousel Message
+
+```js
+await sock.sendMessage(jid, {
+  interactiveMessage: {
+    body: { text: 'Browse our products:' },
+    footer: { text: 'Swipe to see more' },
+    carouselMessage: {
+      cards: [
+        {
+          header: {
+            imageMessage: { url: 'https://example.com/product1.jpg', mimetype: 'image/jpeg' },
+            hasMediaAttachment: true
+          },
+          body:   { text: 'Product 1 – Best seller' },
+          footer: { text: 'Rp 99.000' },
+          nativeFlowMessage: {
+            buttons: [
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Buy Now', id: 'buy_1' }) }
+            ],
+            messageParamsJson: ''
+          }
+        },
+        {
+          header: {
+            imageMessage: { url: 'https://example.com/product2.jpg', mimetype: 'image/jpeg' },
+            hasMediaAttachment: true
+          },
+          body:   { text: 'Product 2 – New arrival' },
+          footer: { text: 'Rp 149.000' },
+          nativeFlowMessage: {
+            buttons: [
+              { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Buy Now', id: 'buy_2' }) }
+            ],
+            messageParamsJson: ''
+          }
+        }
+      ]
+    }
+  }
+})
+```
+
+### Album Message
+
+```js
+await sock.sendAlbumMessage(jid, [
+  { image: { url: 'https://picsum.photos/800/600?1' }, caption: 'Photo 1' },
+  { image: { url: 'https://picsum.photos/800/600?2' }, caption: 'Photo 2' },
+  { video: { url: 'https://example.com/clip.mp4' },    caption: 'Video 1' }
+], { delay: 300 })
+
+await sock.sendMessage(jid, {
+  album: [
+    { image: { url: 'https://picsum.photos/800/600?1' } },
+    { image: { url: 'https://picsum.photos/800/600?2' } }
+  ]
+})
+```
+
+### Forward Message
+
+```js
+await sock.sendMessage(jid, { forward: msg })
+await sock.sendMessage(jid, { forward: msg, force: true })
+```
+
+### Event Message
+
+```js
+await sock.sendMessage(jid, {
+  event: {
+    isCanceled: false,
+    name: 'Team Meeting',
+    description: 'Weekly sync',
+    location: { degreesLatitude: -6.2088, degreesLongitude: 106.8456, name: 'Jakarta' },
+    joinLink: 'https://call.whatsapp.com/video/xxx',
+    startTime: String(Math.floor(Date.now() / 1000) + 3600),
+    endTime: String(Math.floor(Date.now() / 1000) + 7200),
+    extraGuestsAllowed: false
+  }
+})
+```
+
+### Poll Result Message
+
+```js
+await sock.sendMessage(jid, {
+  pollResult: {
+    name: 'Favorite color?',
+    values: [
+      ['Red',   112],
+      ['Green',  45],
+      ['Blue',  233]
+    ]
+  }
+})
+```
+
+### Group Status Message
+
+```js
+// raw object
+await sock.sendMessage(jid, {
+  groupStatusMessage: { text: 'Hello group!' }
+})
+
+// flag wrapper (wraps any message in groupStatusMessage)
+await sock.sendMessage(jid, {
+  image: { url: './photo.jpg' },
+  caption: 'Group status!',
+  groupStatus: true
+})
+```
+
+### View Once Variants
+
+```js
+// viewOnce
+await sock.sendMessage(jid, {
+  image: { url: './photo.jpg' },
+  viewOnce: true
+})
+
+// viewOnceMessageV2
+await sock.sendMessage(jid, {
+  image: { url: './photo.jpg' },
+  viewOnceV2: true
+})
+
+// viewOnceMessageV2Extension
+await sock.sendMessage(jid, {
+  image: { url: './photo.jpg' },
+  viewOnceV2Extension: true
+})
+```
+
+### Ephemeral Wrapper
+
+```js
+await sock.sendMessage(jid, {
+  image: { url: './photo.jpg' },
+  caption: 'Ephemeral message',
+  ephemeral: true
+})
+```
+
+### Interactive as Template
+
+```js
+await sock.sendMessage(jid, {
+  text: 'Choose an option',
+  buttons: [{ id: 'a', text: 'Option A' }],
+  interactiveAsTemplate: true
+})
+```
+
+### External Ad Reply (all message types)
+
+```js
+await sock.sendMessage(jid, {
+  text: 'Check this out',
+  externalAdReply: {
+    title: 'My App',
+    body: 'Click to open',
+    thumbnail: fs.readFileSync('./thumb.jpg'),
+    largeThumbnail: false,
+    url: 'https://example.com',
+    showAdAttribution: true
+  }
+})
+
+// snake_case compatibility aliases are supported too
+await sock.sendMessage(jid, {
+  text: 'Alias compatibility',
+  externalAdReply: {
+    title: 'My App',
+    body: 'Open now',
+    media_type: 1,
+    thumbnail_url: 'https://example.com/thumb.jpg',
+    source_url: 'https://example.com',
+    show_ad_attribution: true,
+    render_larger_thumbnail: false
+  }
+})
+```
+
+### Secure Meta Service Label
+
+```js
+await sock.sendMessage(jid, {
+  text: 'Just a label!',
+  secureMetaServiceLabel: true
+})
+```
+
+### Raw Proto (manual)
+
+```js
+await sock.sendMessage(jid, {
+  extendedTextMessage: {
+    text: 'Built from raw proto',
+    contextInfo: {
+      externalAdReply: {
+        title: 'supunbail',
+        jpegThumbnail: fs.readFileSync('./thumb.jpg'),
+        sourceApp: 'whatsapp',
+        showAdAttribution: true,
+        mediaType: 1
+      }
+    }
+  },
+  raw: true
+})
+```
+
+### Payment Request
+
+> ⚠️ **WA Web only** — Payment request messages are only fully functional on WhatsApp Web. Sending via the mobile app may cause unexpected behaviour or force-close.
+
+```js
+// simple shorthand - requestFrom is who should pay
+await sock.sendMessage(jid, {
+  text: 'Payment for subscription',
+  requestPaymentFrom: jid    // jid of the person who should pay
+})
+
+// full control — amount is in thousandths of the currency unit (auto-rounded if float/string)
+await sock.sendMessage(jid, {
+  requestPayment: {
+    currency: 'IDR',
+    amount: 100000 * 1000,   // 100 000 IDR  →  100000000
+    from: jid,               // JID of who should pay (not the bot's own JID)
+    note: 'Payment for subscription'
+  }
+})
+
+// string amount also supported
+await sock.sendMessage(jid, {
+  requestPayment: {
+    currency: 'IDR',
+    amount: '10000000',      // "10000000" → parsed to 10000000
+    from: jid,
+    note: 'Hai Guys'
+  }
+})
+
+// with sticker note (Buffer or { url })
+await sock.sendMessage(jid, {
+  requestPayment: {
+    currency: 'IDR',
+    amount: 10000 * 1000,
+    from: jid,
+    sticker: fs.readFileSync('./note.webp')
+  }
+})
+
+await sock.sendMessage(jid, {
+  requestPaymentMessage: {
+    currencyCodeIso4217: 'IDR',
+    amount1000: 100000 * 1000,
+    requestFrom: jid,
+    noteMessage: {
+      extendedTextMessage: { text: 'Payment for subscription' }
+    }
+  }
+})
+
+// with background
+await sock.sendMessage(jid, {
+  requestPayment: {
+    currency: 'IDR',
+    amount: 50000 * 1000,
+    from: jid,
+    background: {
+      id: '100',
+      fileLength: '0',
+      width: 1000,
+      height: 1000,
+      mimetype: 'image/webp',
+      placeholderArgb: 0xFF00FFFF,
+      textArgb: 0xFFFFFFFF,
+      subtextArgb: 0xFFAA00FF
+    }
+  }
+})
+```
+
+### Send Payment (respond to a request)
+
+> ⚠️ **WA Web only** — Send payment payload rendering depends on WhatsApp Web support.
+
+```js
+await sock.sendMessage(jid, {
+  sendPayment: {
+    requestMessageKey: reqMsg.key, // key dari pesan requestPayment yang mau dibayar
+    note: 'Paid, thank you!',
+    transactionData: 'opaque-transaction-payload'
+  }
+})
+
+// raw/proto-compatible form
+await sock.sendMessage(jid, {
+  sendPaymentMessage: {
+    requestMessageKey: reqMsg.key,
+    noteMessage: {
+      extendedTextMessage: { text: 'Paid via transfer' }
+    }
+  }
+})
+```
+
+### Decline / Cancel Payment Request
+
+```js
+// decline request from the payer side
+await sock.sendMessage(jid, {
+  declinePaymentRequest: reqMsg.key
+})
+
+// cancel request from the requester side
+await sock.sendMessage(jid, {
+  cancelPaymentRequest: reqMsg.key
+})
+```
+
+### Payment Invite
+
+> ⚠️ **WA Web only** — Payment invite messages (GPay / PhonePe / Meta Pay) are only rendered on WhatsApp Web.
+
+```js
+// serviceType: 1 = GPay, 2 = PhonePe, 3 = Meta Pay
+await sock.sendMessage(jid, {
+  paymentInviteServiceType: 3,
+  paymentInviteExpiry: Math.floor(Date.now() / 1000) + 86400
+})
+
+// alias object form
+await sock.sendMessage(jid, {
+  paymentInvite: {
+    type: 3,
+    expiry: Math.floor(Date.now() / 1000) + 86400
+  }
+})
+```
+
+### Invoice
+
+```js
+await sock.sendMessage(jid, {
+  image: { url: './invoice.jpg' },
+  invoiceNote: 'Invoice #1234'
+})
+```
+
+### Order (simple)
+
+```js
+await sock.sendMessage(jid, {
+  orderText: 'Your order is ready!',
+  thumbnail: fs.readFileSync('./product.jpg')
+}, { quoted: message })
+```
+
+### Order (full)
+
+```js
+await sock.sendMessage(jid, {
+  order: {
+    id: 'ORD-1001',
+    thumbnail: fs.readFileSync('./product.jpg'),
+    itemCount: 2,
+    status: 1,
+    surface: 1,
+    title: 'Order Confirmation',
+    text: 'Thanks for your purchase!',
+    seller: '947xx@s.whatsapp.net',
+    token: 'order-token',
+    amount: 150000 * 1000,
+    currency: 'IDR'
+  }
+})
+```
+
+### Product Message
+
+```js
+await sock.sendMessage(jid, {
+  product: {
+    productImage: { url: 'https://example.com/product.jpg' },
+    productId: 'prod-1',
+    title: 'Premium Coffee Beans',
+    description: 'Roasted arabica',
+    currencyCode: 'IDR',
+    priceAmount1000: '120000000',
+    retailerId: 'sku-001',
+    productImageCount: 1
+  },
+  businessOwnerJid: '947xx@s.whatsapp.net'
+})
+```
+
+### Product List Message
+
+```js
+await sock.sendMessage(jid, {
+  title: 'Catalog',
+  text: 'Choose a product',
+  footer: '@supun-fernando',
+  buttonText: 'View Products',
+  businessOwnerJid: '947xxx@s.whatsapp.net',
+  productList: [
+    {
+      title: 'Best Seller',
+      products: [
+        { productId: 'prod-1' },
+        { productId: 'prod-2' }
+      ]
+    }
+  ]
+})
+```
+
+### Shop Interactive
+
+```js
+await sock.sendMessage(jid, {
+  text: 'Open storefront',
+  footer: '@supun-fernando',
+  shop: {
+    id: '947xxx@s.whatsapp.net',
+    surface: 1
+  }
+})
+```
+
+### Template Buttons (legacy)
+
+```js
+await sock.sendMessage(jid, {
+  text: 'Choose action',
+  footer: '@supun-fernando',
+  templateButtons: [
+    { index: 1, quickReplyButton: { displayText: 'Ping', id: 'ping' } },
+    { index: 2, urlButton: { displayText: 'Website', url: 'https://supunmd.vercel.app' } }
+  ]
+})
+```
+
+### Interactive Buttons (native flow shorthand)
+
+```js
+await sock.sendMessage(jid, {
+  text: 'Quick options',
+  footer: '@supun-fernando',
+  interactiveButtons: [
+    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Option A', id: 'opt_a' }) },
+    { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: 'Option B', id: 'opt_b' }) }
+  ]
+})
+```
+
+### List Reply (send simulated response)
+
+```js
+await sock.sendMessage(jid, {
+  listReply: {
+    title: 'Order Menu',
+    description: 'Selected by bot',
+    singleSelectReply: { selectedRowId: 'pizza' },
+    listType: 1
+  }
+})
+```
+
+### Group Invite Message (send)
+
+```js
+await sock.sendMessage(jid, {
+  groupInvite: {
+    inviteCode: 'AbCdEfGhIj',
+    inviteExpiration: Math.floor(Date.now() / 1000) + 86400,
+    text: 'Join our group',
+    jid: '1203630xxxxxxxx@g.us',
+    subject: 'Supun Md Community'
+  }
+})
+```
+
+### Newsletter Admin Invite (send)
+
+```js
+await sock.sendMessage(jid, {
+  inviteAdmin: {
+    inviteExpiration: Math.floor(Date.now() / 1000) + 86400,
+    text: 'Please become admin',
+    jid: '1203630xxxxxxxx@newsletter',
+    subject: 'Supun Md Channel',
+    thumbnail: fs.readFileSync('./thumb.jpg')
+  }
+})
+```
+
+### Phone Number Request / Share
+
+```js
+await sock.sendMessage(jid, { requestPhoneNumber: true })
+await sock.sendMessage(jid, { sharePhoneNumber: true })
+```
+
+### Scheduled Call Message
+
+```js
+await sock.sendMessage(jid, {
+  call: {
+    title: 'Project Sync Call',
+    type: 1,
+    time: Date.now() + 10 * 60 * 1000
+  }
+})
+```
+
+### Status / Story
+
+```js
+await sock.sendMessage('status@broadcast', {
+  text: 'Hello everyone!',
+  backgroundColor: '#FF5733',
+  font: 3
+}, {
+  statusJidList: ['947xxx@s.whatsapp.net', '947xxx@s.whatsapp.net']
+})
+
+await sock.sendMessage('status@broadcast', {
+  image: { url: 'https://example.com/photo.jpg' },
+  caption: 'Check out this photo!'
+}, {
+  statusJidList: ['947xxx@s.whatsapp.net']
+})
+
+await sock.sendStatusMentions(
+  { text: 'Hey check this out!' },
+  ['947xxx@s.whatsapp.net']
+)
+
+await sock.sendStatusMentions(
+  { image: { url: 'https://example.com/photo.jpg' }, caption: 'Photo!' },
+  ['947xxx@s.whatsapp.net']
+)
+
+await sock.sendGroupStatus(
+  ['120363012345678@g.us', '120363012345679@g.us'],
+  { text: 'Status for group members' }
+)
+
+await sock.sendGroupStatus(
+  ['120363012345678@g.us'],
+  {
+    image: { url: 'https://example.com/photo.jpg' },
+    caption: 'Group status V2 with media'
+  },
+  {
+    relay: { useCachedGroupMetadata: true }
+  }
+)
+
+// Backward-compatible: if your code relays `groupStatusMessageV2` or `groupStatusMessage` directly to a group JID,
+// Baileys will auto-route it via `status@broadcast` and resolve group members as audience.
+// Recommended API is still `sendGroupStatus(...)`.
+```
+
+### Image Slide / Carousel (Code Only)
+
+```js
+const { proto, prepareWAMessageMedia, generateWAMessageFromContent } = require('@mr-supun-fernando/supunmd-bail')
+
+const result = []
+const imageUrls = [
+  'https://example.com/1.jpg',
+  'https://example.com/2.jpg',
+  'https://example.com/3.jpg'
+]
+
+for (let i = 0; i < imageUrls.length; i++) {
+  const imageMessage = await prepareWAMessageMedia(
+    { image: { url: imageUrls[i] } },
+    { upload: sock.waUploadToServer }
+  )
+
+  result.push({
+    body: proto.Message.InteractiveMessage.Body.fromObject({}),
+    footer: proto.Message.InteractiveMessage.Footer.fromObject({}),
+    header: proto.Message.InteractiveMessage.Header.fromObject({
+      title: `Slide ${i + 1}/${imageUrls.length}`,
+      hasMediaAttachment: true,
+      ...imageMessage
+    }),
+    nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.fromObject({
+      buttons: []
+    })
+  })
+}
+
+const msg = generateWAMessageFromContent(jid, {
+  viewOnceMessage: {
+    message: {
+      messageContextInfo: {
+        deviceListMetadata: {},
+        deviceListMetadataVersion: 2
+      },
+      interactiveMessage: proto.Message.InteractiveMessage.fromObject({
+        body: proto.Message.InteractiveMessage.Body.fromObject({
+          text: 'Image Slide'
+        }),
+        header: proto.Message.InteractiveMessage.Header.fromObject({
+          hasMediaAttachment: false
+        }),
+        carouselMessage: proto.Message.InteractiveMessage.CarouselMessage.fromObject({
+          cards: result
+        })
+      })
+    }
+  }
+}, { quoted: m })
+
+await sock.relayMessage(msg.key.remoteJid, msg.message, { messageId: msg.key.id })
+```
+
+### Button Reply (send)
+
+```js
+await sock.sendMessage(jid, {
+  buttonReply: { title: 'Pizza', rowId: 'pizza' },
+  type: 'list'
+})
+
+await sock.sendMessage(jid, {
+  buttonReply: { displayText: 'View Menu', id: 'id1', index: 0 },
+  type: 'template'
+})
+
+await sock.sendMessage(jid, {
+  buttonReply: {
+    displayText: 'Yes!',
+    nativeFlows: { name: 'quick_reply', paramsJson: JSON.stringify({ id: 'yes' }) }
+  },
+  type: 'interactive'
+})
+```
+
+---
+
+## Receiving Button Responses
+
+When a user taps a quick_reply or single_select button, the bot receives an `interactiveResponseMessage`.
+
+```js
+sock.ev.on('messages.upsert', async ({ messages }) => {
+  const msg = messages[0]
+  if (!msg.message) return
+
+  const type = getContentType(msg.message)
+
+  if (type === 'interactiveResponseMessage') {
+    const response = msg.message.interactiveResponseMessage
+    const body = response?.body?.text
+    try {
+      const params = JSON.parse(response?.nativeFlowResponseMessage?.paramsJson || '{}')
+      const buttonId = params.id
+      const displayText = params.display_text || body
+
+      console.log('Button pressed:', buttonId, '|', displayText)
+
+      if (buttonId === 'yes') {
+        await sock.sendMessage(msg.key.remoteJid, { text: 'You chose Yes!' }, { quoted: msg })
+      } else if (buttonId === 'no') {
+        await sock.sendMessage(msg.key.remoteJid, { text: 'You chose No!' }, { quoted: msg })
+      }
+    } catch (e) {
+      console.log('Button response body:', body)
+    }
+    return
+  }
+
+  if (type === 'listResponseMessage') {
+    const selectedId = msg.message.listResponseMessage?.singleSelectReply?.selectedRowId
+    const selectedTitle = msg.message.listResponseMessage?.title
+    console.log('List selected:', selectedId, '|', selectedTitle)
+    return
+  }
+
+  if (type === 'buttonsResponseMessage') {
+    const selectedId = msg.message.buttonsResponseMessage?.selectedButtonId
+    const displayText = msg.message.buttonsResponseMessage?.selectedDisplayText
+    console.log('Button selected:', selectedId, '|', displayText)
+    return
+  }
+})
+```
+
+---
+
+## Modify Messages
+
+```js
+const sent = await sock.sendMessage(jid, { text: 'Original text' })
+
+await sock.sendMessage(jid, { text: 'Corrected text', edit: sent.key })
+
+await sock.sendMessage(jid, { delete: msg.key })
+
+await sock.sendMessage(jid, { pin: sent.key, type: 1 })
+await sock.sendMessage(jid, { pin: sent.key, type: 2 })
+
+await sock.sendMessage(jid, { keep: msg.key, type: 1 })
+```
+
+---
+
+## Media Handling
+
+```js
+const { downloadMediaMessage } = require('@mr-supun-fernando/supunmd-bail')
+const fs = require('fs')
+
+sock.ev.on('messages.upsert', async ({ messages }) => {
+  const msg = messages[0]
+  if (!msg.message) return
+
+  const type = getContentType(msg.message)
+  const mediaTypes = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage']
+
+  if (mediaTypes.includes(type)) {
+    const buffer = await downloadMediaMessage(msg, 'buffer', {})
+    fs.writeFileSync('./downloads/media', buffer)
+
+    const stream = await downloadMediaMessage(msg, 'stream', {})
+    stream.pipe(fs.createWriteStream('./downloads/stream-file'))
+
+    console.log('Downloaded', type, 'size:', buffer.length, 'bytes')
+  }
+})
+```
+
+---
+
+## Read Receipts
+
+```js
+await sock.readMessages([msg.key])
+
+await sock.readMessages([
+  { id: 'MSG_ID_1', remoteJid: jid, fromMe: false },
+  { id: 'MSG_ID_2', remoteJid: jid, fromMe: false }
+])
+```
+
+---
+
+## Reject Call
+
+```js
+sock.ev.on('call', async (calls) => {
+  for (const call of calls) {
+    if (call.status === 'offer') {
+      await sock.rejectCall(call.id, call.from)
+    }
+  }
+})
+```
+
+---
+
+## Presence
+
+```js
+await sock.sendPresenceUpdate('available')
+await sock.sendPresenceUpdate('unavailable')
+await sock.sendPresenceUpdate('composing', jid)
+await sock.sendPresenceUpdate('paused', jid)
+await sock.sendPresenceUpdate('recording', jid)
+
+await sock.presenceSubscribe(jid)
+
+sock.ev.on('presence.update', ({ id, presences }) => {
+  for (const [participant, presence] of Object.entries(presences)) {
+    console.log(participant, 'is', presence.lastKnownPresence)
+    if (presence.lastSeen) console.log('Last seen:', new Date(presence.lastSeen * 1000))
+  }
+})
+```
+
+---
+
+## Chat Modification
+
+```js
+await sock.chatModify(
+  { archive: true, lastMessages: [{ key: msg.key, messageTimestamp: msg.messageTimestamp }] },
+  jid
+)
+
+await sock.chatModify({ pin: true }, jid)
+await sock.chatModify({ pin: false }, jid)
+
+await sock.chatModify({ mute: Date.now() + 8 * 60 * 60 * 1000 }, jid)
+await sock.chatModify({ mute: null }, jid)
+
+await sock.chatModify(
+  { markRead: false, lastMessages: [{ key: msg.key, messageTimestamp: msg.messageTimestamp }] },
+  jid
+)
+
+await sock.chatModify(
+  { delete: true, lastMessages: [{ key: msg.key, messageTimestamp: msg.messageTimestamp }] },
+  jid
+)
+
+await sock.star(jid, [{ id: msg.key.id, fromMe: !!msg.key.fromMe }], true)
+await sock.star(jid, [{ id: msg.key.id, fromMe: !!msg.key.fromMe }], false)
+
+await sock.sendMessage(jid, { disappearingMessagesInChat: true })
+await sock.sendMessage(jid, { disappearingMessagesInChat: false })
+await sock.sendMessage(jid, { disappearingMessagesInChat: 86400 })
+```
+
+---
+
+## User Queries
+
+```js
+const [result] = await sock.onWhatsApp('947xxx@s.whatsapp.net')
+console.log(result?.exists, result?.lid)
+
+const results = await sock.onWhatsApp('947xxx@s.whatsapp.net', '947xxx@s.whatsapp.net')
+results.forEach(r => console.log(r.jid, r.exists))
+
+const statuses = await sock.fetchStatus(jid)
+console.log(statuses?.[0]?.status)
+
+const durations = await sock.fetchDisappearingDuration(jid)
+
+const props = await sock.fetchProps()
+console.log('Web props:', props)
+// useful for checking account/web capability flags (varies by account)
+
+const previewUrl = await sock.profilePictureUrl(jid, 'preview')
+const fullUrl = await sock.profilePictureUrl(jid, 'image')
+
+await sock.addOrEditContact(jid, { notify: 'John Doe' })
+await sock.removeContact(jid)
+
+// resolve PN ↔ LID bidirectionally
+const ids = await sock.findUserId('947xxx@s.whatsapp.net')
+console.log(ids.phoneNumber, ids.lid)
+
+const ids2 = await sock.findUserId('43411111111111@lid')
+console.log(ids2.phoneNumber, ids2.lid)
+// { phoneNumber: '947xxx@s.whatsapp.net', lid: '434xxx@lid' }
+// { phoneNumber: 'id-not-found', lid: '434xxx@lid' }  <- when not resolvable
+```
+
+---
+
+## Profile
+
+```js
+const fs = require('fs')
+
+await sock.updateProfileName('supunbail Bot')
+await sock.updateProfileStatus('Running on @mr-supun-fernando/supunmd-bail')
+await sock.updateProfilePicture(sock.authState.creds.me.id, fs.readFileSync('./avatar.jpg'))
+await sock.updateProfilePicture(groupJid, fs.readFileSync('./group-icon.jpg'))
+await sock.removeProfilePicture(sock.authState.creds.me.id)
+```
+
+---
+
+## Privacy Settings
+
+```js
+await sock.updateLastSeenPrivacy('contacts')
+await sock.updateOnlinePrivacy('match_last_seen')
+await sock.updateProfilePicturePrivacy('contacts')
+await sock.updateStatusPrivacy('contacts')
+await sock.updateReadReceiptsPrivacy('all')
+await sock.updateGroupsAddPrivacy('contacts')
+await sock.updateMessagesPrivacy('all')
+await sock.updateCallPrivacy('contacts')
+await sock.updateDefaultDisappearingMode(604800)
+await sock.updateDisableLinkPreviewsPrivacy(true)
+```
+
+---
+
+## Block / Unblock
+
+```js
+const blocklist = await sock.fetchBlocklist()
+await sock.updateBlockStatus('947xxx@s.whatsapp.net', 'block')
+await sock.updateBlockStatus('947xxx@s.whatsapp.net', 'unblock')
+```
+
+---
+
+## Groups
+
+```js
+const group = await sock.groupCreate('My Group', [
+  '947xxx@s.whatsapp.net',
+  '947xxx@s.whatsapp.net'
+])
+console.log('Group JID:', group.id)
+
+await sock.groupLeave(groupJid)
+
+await sock.groupUpdateSubject(groupJid, 'New Group Name')
+await sock.groupUpdateDescription(groupJid, 'New description.')
+await sock.groupUpdateDescription(groupJid, null)
+
+await sock.groupParticipantsUpdate(groupJid, ['947xxx@s.whatsapp.net'], 'add')
+await sock.groupParticipantsUpdate(groupJid, ['947xxx@s.whatsapp.net'], 'remove')
+await sock.groupParticipantsUpdate(groupJid, ['947xxx@s.whatsapp.net'], 'promote')
+await sock.groupParticipantsUpdate(groupJid, ['947xxx@s.whatsapp.net'], 'demote')
+
+const code = await sock.groupInviteCode(groupJid)
+const newCode = await sock.groupRevokeInvite(groupJid)
+const joinedJid = await sock.groupAcceptInvite('INVITE_CODE')
+const info = await sock.groupGetInviteInfo('INVITE_CODE')
+
+sock.ev.on('messages.upsert', async ({ messages }) => {
+  const msg = messages[0]
+  if (msg.message?.groupInviteMessage) {
+    await sock.groupAcceptInviteV4(msg.key, msg.message.groupInviteMessage)
+  }
+})
+
+await sock.groupRevokeInviteV4(groupJid, '947xxx@s.whatsapp.net')
+
+await sock.groupJoinApprovalMode(groupJid, 'on')
+const requests = await sock.groupRequestParticipantsList(groupJid)
+await sock.groupRequestParticipantsUpdate(groupJid, ['947xxx@s.whatsapp.net'], 'approve')
+await sock.groupRequestParticipantsUpdate(groupJid, ['947xxx@s.whatsapp.net'], 'reject')
+
+await sock.groupSettingUpdate(groupJid, 'announcement')
+await sock.groupSettingUpdate(groupJid, 'not_announcement')
+await sock.groupSettingUpdate(groupJid, 'locked')
+await sock.groupSettingUpdate(groupJid, 'unlocked')
+
+await sock.groupMemberAddMode(groupJid, 'all_member_add')
+
+await sock.groupToggleEphemeral(groupJid, 604800)
+await sock.groupToggleEphemeral(groupJid, 86400)
+await sock.groupToggleEphemeral(groupJid, 0)
+
+const meta = await sock.groupMetadata(groupJid)
+console.log(meta.id, meta.subject, meta.desc, meta.participants.length)
+
+const groups = await sock.groupFetchAllParticipating()
+for (const [jid, meta] of Object.entries(groups)) {
+  console.log(meta.subject, jid)
+}
+```
+
+---
+
+## Community
+
+```js
+const community = await sock.communityCreate('My Community', 'Welcome!')
+
+const meta = await sock.communityMetadata(communityJid)
+
+await sock.communityUpdateSubject(communityJid, 'New Name')
+await sock.communityUpdateDescription(communityJid, 'New description.')
+
+await sock.communityCreateGroup('Study Room', ['947xxx@s.whatsapp.net'], communityJid)
+
+await sock.communityLinkGroup(existingGroupJid, communityJid)
+await sock.communityUnlinkGroup(existingGroupJid, communityJid)
+
+const { linkedGroups } = await sock.communityFetchLinkedGroups(communityJid)
+
+await sock.communityParticipantsUpdate(communityJid, ['947xxx@s.whatsapp.net'], 'add')
+await sock.communityParticipantsUpdate(communityJid, ['947xxx@s.whatsapp.net'], 'remove')
+
+const cCode = await sock.communityInviteCode(communityJid)
+await sock.communityRevokeInvite(communityJid)
+
+const reqs = await sock.communityRequestParticipantsList(communityJid)
+await sock.communityRequestParticipantsUpdate(communityJid, ['947xxx@s.whatsapp.net'], 'approve')
+
+await sock.communityLeave(communityJid)
+```
+
+---
+
+## Newsletter / Channel
+
+```js
+const fs = require('fs')
+
+const newsletter = await sock.newsletterCreate(
+  'My Channel',
+  'Latest updates',
+  fs.readFileSync('./logo.jpg')
+)
+console.log('Newsletter JID:', newsletter.id)
+
+await sock.newsletterDelete(newsletter.id)
+
+await sock.newsletterUpdateName(newsletter.id, 'New Channel Name')
+await sock.newsletterUpdateDescription(newsletter.id, 'Updated description.')
+await sock.newsletterUpdatePicture(newsletter.id, fs.readFileSync('./logo.jpg'))
+await sock.newsletterRemovePicture(newsletter.id)
+
+await sock.newsletterFollow(newsletter.id)
+await sock.newsletterUnfollow(newsletter.id)
+await sock.newsletterMute(newsletter.id)
+await sock.newsletterUnmute(newsletter.id)
+
+await sock.subscribeNewsletterUpdates(newsletter.id)
+
+const meta = await sock.newsletterMetadata('JID', newsletter.id)
+console.log(meta.name, meta.subscribers, meta.verification)
+
+const count = await sock.newsletterAdminCount(newsletter.id)
+
+await sock.newsletterChangeOwner(newsletter.id, '947xxx@s.whatsapp.net')
+await sock.newsletterDemote(newsletter.id, '947xxx@s.whatsapp.net')
+
+await sock.newsletterReactionMode(newsletter.id, 'all')
+await sock.newsletterReactionMode(newsletter.id, 'basic')
+await sock.newsletterReactionMode(newsletter.id, 'none')
+
+const messages = await sock.newsletterFetchMessages('jid', newsletter.id, 10)
+for (const item of messages) {
+  console.log('Server ID:', item.server_id, 'Views:', item.views)
+}
+
+const updates = await sock.newsletterFetchUpdates(newsletter.id, 10)
+
+await sock.newsletterReactMessage(newsletter.id, 'SERVER_ID', 'x')
+await sock.newsletterReactMessage(newsletter.id, 'SERVER_ID', null)
+
+const inviteMeta = await sock.newsletterId('https://whatsapp.com/channel/0029Va9vcYKGgYKQNc8wUd')
+console.log('Newsletter ID:', inviteMeta.id, inviteMeta.name)
+
+const subscribed = await sock.newsletterSubscribed()
+for (const ch of subscribed) {
+  console.log(ch.id, ch.name)
+}
+
+await sock.sendMessage('1203630xxxxxxxx@newsletter', {
+  video: { url: 'https://a.top4top.io/m_3706zd9k00.mp4' },
+  caption: 'Hello World.!',
+  streamingSidecar: 'QD4XJIMi3ARGTYV8zNWRfNX05nc//e7lxshUO2RH/NuhA7tkg5ew/vPfKOFtIrTt/+E=',
+  annotations: [
+    {
+      embeddedContent: {
+        embeddedMusic: {
+          musicContentMediaId: '12',
+          songId: '11',
+          author: 'Shinaru',
+          title: 'Oryta Community',
+          artistAttribution: 'https://supunmd.vercel.app'
+        }
+      },
+      embeddedAction: true
+    }
+  ]
+})
+```
+
+---
+
+## Business Profile
+
+```js
+const profile = await sock.getBusinessProfile('947xxx@s.whatsapp.net')
+console.log(profile?.address, profile?.email, profile?.description)
+
+await sock.updateBusinessProfile({
+  address: '123 Main Street, Jakarta',
+  email: 'contact@mybusiness.com',
+  description: 'Official WhatsApp Business account.',
+  websites: ['https://mybusiness.com'],
+  hours: {
+    timezone: 'Asia/Jakarta',
+    days: [
+      { day: 'MON', mode: 'specific_hours', openTimeInMinutes: 540, closeTimeInMinutes: 1080 },
+      { day: 'SAT', mode: 'open_24h' },
+      { day: 'SUN', mode: 'closed' }
+    ]
+  }
+})
+
+await sock.updateCoverPhoto(fs.readFileSync('./cover.jpg'))
+await sock.removeCoverPhoto()
+```
+
+> Compatibility: `sock.updateBussinesProfile(...)` remains available as a legacy alias.
+
+---
+
+## Labels
+
+```js
+await sock.addChatLabel(jid, 'LABEL_ID')
+await sock.removeChatLabel(jid, 'LABEL_ID')
+await sock.addMessageLabel(jid, msg.key.id, 'LABEL_ID')
+await sock.removeMessageLabel(jid, msg.key.id, 'LABEL_ID')
+
+await sock.addOrEditQuickReply({
+  shortcut: 'hello',
+  message: 'Hello! How can I help you?',
+  timestamp: Date.now()
+})
+await sock.removeQuickReply(timestamp)
+
+await sock.updateMemberLabel(groupJid, 'Custom Member Tag')
+```
+
+---
+
+## Bot Features
+
+```js
+const bots = await sock.getBotListV2()
+console.log(bots)
+
+await sock.sendMessage(jid, {
+  text: 'What is the weather today?',
+  ai: true
+})
+```
+
+### Rich AI Response (Bot Forward)
+
+Send a WhatsApp AI-style rich response — the same format used by Meta AI bots — with an optional syntax-highlighted code block.  
+Uses `botForwardedMessage` → `richResponseMessage` → `unifiedResponse` (raw JSON bytes in the `data` field).
+
+```js
+// Text-only
+await sock.sendMessage(jid, {
+  richResponse: {
+    text: 'aku hann universe'
+  }
+})
+
+// Text + JS code block (auto-tokenized)
+await sock.sendMessage(jid, {
+  richResponse: {
+    text: 'Here is a Hello World example:',
+    code: 'console.log("Hello World")',
+    language: 'javascript'   // default
+  }
+})
+
+// Text + code + custom bot JID
+await sock.sendMessage(jid, {
+  richResponse: {
+    text: 'Result:',
+    code: 'const x = 42\nconsole.log(x)',
+    botJid: '259786046210223@bot'
+  }
+})
+```
+
+Token types produced by the built-in tokenizer: `KEYWORD`, `STR`, `NUMBER`, `METHOD`, `COMMENT`, `DEFAULT`  
+(mapped to `GenAICodeUXPrimitive.code_blocks` inside the `unifiedResponse` payload).
+
+WAProto types used: `AIRichResponseMessage` (field 97), `AIRichResponseUnifiedResponse`, `ForwardedAIBotMessageInfo`, `BotMessageSharingInfo` — all present in WAProto.
+
+---
+
+## New Message Types (WA 2.3000+)
+
+These message types were added in WhatsApp Web 2.3000.x. All support both a short-key alias and the full proto field name.
+
+### Status Notification
+
+Sent when a status add-yours / reshare / question-answer-reshare event fires.
+
+```js
+await sock.sendMessage(jid, {
+  statusNotification: {
+    responseMessageKey: { remoteJid: jid, id: 'MSG_ID' },
+    originalMessageKey:  { remoteJid: jid, id: 'ORIG_ID' },
+    type: 1  // 1=STATUS_ADD_YOURS, 2=STATUS_RESHARE, 3=STATUS_QUESTION_ANSWER_RESHARE
+  }
+})
+// full proto key also accepted:
+// statusNotificationMessage: { ... }
+```
+
+### Status Question Answer
+
+User answered a status question.
+
+```js
+await sock.sendMessage(jid, {
+  statusQuestionAnswer: {
+    key:  { remoteJid: jid, id: 'MSG_ID' },
+    text: 'My answer'
+  }
+})
+// full proto key: statusQuestionAnswerMessage
+```
+
+### Question Response
+
+Direct response to a question message.
+
+```js
+await sock.sendMessage(jid, {
+  questionResponse: {
+    key:  { remoteJid: jid, id: 'QUESTION_MSG_ID' },
+    text: 'My response'
+  }
+})
+// full proto key: questionResponseMessage
+```
+
+### Status Quoted Message
+
+Quote a status with a custom type.
+
+```js
+await sock.sendMessage(jid, {
+  statusQuoted: {
+    type: 1,           // 1 = QUESTION_ANSWER
+    text: 'Quoted text',
+    thumbnail: Buffer, // optional
+    originalStatusId: { remoteJid: jid, id: 'STATUS_MSG_ID' }
+  }
+})
+// full proto key: statusQuotedMessage
+```
+
+### Status Sticker Interaction
+
+React to a status with a sticker.
+
+```js
+await sock.sendMessage(jid, {
+  statusStickerInteraction: {
+    key:       { remoteJid: jid, id: 'STATUS_MSG_ID' },
+    stickerKey: 'sticker-hash-key',
+    type: 1    // 1 = REACTION
+  }
+})
+// full proto key: statusStickerInteractionMessage
+```
+
+### Newsletter Follower Invite
+
+Invite a user to follow a newsletter.
+
+```js
+await sock.sendMessage(jid, {
+  newsletterFollowerInvite: {
+    newsletterJid:  '120363xxxxxx@newsletter',
+    newsletterName: 'My Channel',
+    jpegThumbnail:  Buffer, // optional
+    caption: 'Join my channel!'
+  }
+})
+// full proto key: newsletterFollowerInviteMessageV2
+```
+
+### Message History Notice
+
+Notify about message history metadata.
+
+```js
+await sock.sendMessage(jid, {
+  messageHistoryNotice: {
+    contextInfo: { ... }
+    // messageHistoryMetadata is optional
+  }
+})
+```
+
+---
+
+## WAProto Sync & Auto-Update
+
+WAProto is the bundled protobuf module (`WAProto/index.js`) auto-generated from WhatsApp Web. Every top-level proto type has its own per-module directory with `.js` and `.proto` files.
+
+### Available Scripts
+
+```bash
+# Fetch latest proto from WA Web + regenerate bundle + sync per-module files + update version
+yarn update:all
+
+# Same as above but proto only (no version update)
+yarn update:proto
+
+# Update WA Web version tracking only (no proto extraction)
+yarn update:version
+
+# Re-sync per-module wrapper files from existing WAProto/index.js (no network)
+# Useful after a git pull that updated WAProto/index.js
+yarn sync:proto
+```
+
+### Version Tracking
+
+The current WhatsApp Web version is stored in:
+
+```
+lib/Defaults/supunbail-version.json
+```
+
+Format: `{"version":[2,3000,XXXXXXXXX]}`. Updated automatically by `yarn update:version` and `yarn update:all`. The version array is also exported from the library as `version` and embedded as a `/// WhatsApp Version:` comment in each `.proto` file.
+
+### Auto-Update CI
+
+The GitHub Actions **Auto Update** workflow runs every Sunday (`0 0 * * 0`) and:
+
+1. Runs `yarn update:version` — fetches the latest WA Web version, updates `lib/Defaults/supunbail-version.json` and `lib/Defaults/index.js`
+2. Runs `yarn update:proto` — re-extracts the proto schema from WA Web, regenerates `WAProto/index.js`, syncs all per-module `.js`/`.proto` files
+3. If proto extraction fails, runs `yarn sync:proto` as fallback to regenerate per-module wrappers from the existing bundle
+4. Bumps the npm patch version, commits all changes, creates a git tag, pushes to `main`, and publishes to npm
+
+You can also trigger it manually from the **Actions** tab → **Auto Update** → **Run workflow**.
+
+---
+
+## Call Link
+
+```js
+const token = await sock.createCallLink('video')
+console.log('Video call link token:', token)
+
+const audioToken = await sock.createCallLink('audio')
+
+const eventToken = await sock.createCallLink('video', {
+  startTime: Math.floor(Date.now() / 1000) + 3600
+})
+```
+
+---
+
+## Custom WS Callbacks
+
+```js
+const pino = require('pino')
+const sock = makeWASocket({
+  logger: pino({ level: 'debug' })
+})
+
+sock.ws.on('CB:edge_routing', (node) => console.log('Edge routing:', node))
+sock.ws.on('CB:iq', (node) => console.log('IQ received:', node.attrs))
+sock.ws.on('CB:call', (node) => console.log('Call node:', node))
+```
+
+---
+
+## Maintenance Mode
+
+supunbail includes a built-in **maintenance mode** feature. When enabled, each `makeWASocket()` call immediately shows a maintenance message and stops the process — useful when you need to apply updates or fixes without creating a new WhatsApp connection.
+
+### Enable / Disable via npm scripts
+
+```bash
+# Enable maintenance mode
+npm run maintenance:on
+
+# Disable maintenance mode
+npm run maintenance:off
+```
+
+### Enable via code
+
+```js
+const { MAINTENANCE_MODE, MAINTENANCE_MESSAGE } = require('@mr-supun-fernando/supunmd-bail')
+
+// Check status
+console.log('Maintenance active?', MAINTENANCE_MODE)
+// Default message: '[supunbail] Maintenance mode is currently active. ...'
+console.log(MAINTENANCE_MESSAGE)
+```
+
+> **Note:** `npm run maintenance:on/off` directly modifies `lib/Defaults/index.js`, so the effect is persistent until changed again. For temporary usage (env-based), set variables in your own code before calling `makeWASocket`.
 
 ---
 
