@@ -30,18 +30,20 @@ This library is highly suitable for building business bots, chat automation syst
 - Suitable for developing bots, automation, and complete communication solutions
 - Comprehensive documentation and example codes to facilitate development
 
----
+<details>
+
+<summary><strong>📦 Installation</strong></summary>
 
 ## 📦 Installation
 
 ### NPM
 ```bash
-npm install supunmd-bail
+npm install @mr-supun-fernando/supunmd-bail
 ```
 
 ### Yarn
 ```bash
-yarn add supunmd-bail
+yarn add @mr-supun-fernando/supunmd-bail
 ```
 
 ### Using Different Package Name
@@ -49,7 +51,7 @@ Add to your `package.json`:
 ```json
 {
   "dependencies": {
-    "@whiskeysockets/baileys": "npm:supunmd-bail"
+    "@whiskeysockets/baileys": "npm:@mr-supun-fernando/supunmd-bail"
   }
 }
 ```
@@ -57,13 +59,14 @@ Add to your `package.json`:
 ### Import
 ```javascript
 // ESM
-import makeWASocket from 'supunmd-bail'
+import makeWASocket from '@mr-supun-fernando/supunmd-bail'
 
 // CommonJS
-const { default: makeWASocket } = require('supunmd-bail')
+const { default: makeWASocket } = require('@mr-supun-fernando/supunmd-bail')
 ```
 
 ---
+</details>
 
 <details>
 
@@ -530,6 +533,6 @@ Because this library offers high stability, full features, and an actively impro
 
 - **Issues**: [Whatsapp Channel](https://whatsapp.com/channel/0029Vb55cv41nozBTTIw1y07)
 - **Discussions**: [Whatsapp Channel](https://whatsapp.com/channel/0029Vb55cv41nozBTTIw1y07)
-- **NPM**: [@mr-supun-fernando/baileyz](https://www.npmjs.com/package/mr-supun-fernando/supunmd-bail)
+- **NPM**: [@mr-supun-fernando/supunmd-bail](https://www.npmjs.com/package/@mr-supun-fernando/supunmd-bail)
 
 **Built with ❤️ for the WhatsApp dev community. Let's automate the future!** 🚀
