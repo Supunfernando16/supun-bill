@@ -371,7 +371,7 @@ areJidsSameUser('947xxx@s.whatsapp.net', '947xxx:5@s.whatsapp.net')
 
 <details>
 
-<summary><strong>Click to expand: Bailey Some Usage Things</strong></summary>
+<summary><strong>Bailey Some Usage Things</strong></summary>
 
 ## WhatsApp IDs
 
@@ -2178,7 +2178,7 @@ const updates = await sock.newsletterFetchUpdates(newsletter.id, 10)
 await sock.newsletterReactMessage(newsletter.id, 'SERVER_ID', 'x')
 await sock.newsletterReactMessage(newsletter.id, 'SERVER_ID', null)
 
-const inviteMeta = await sock.newsletterId('https://whatsapp.com/channel/0029Va9vcYKGgYKQNc8wUd')
+const inviteMeta = await sock.newsletterId('https://whatsapp.com/channel/0029Vb55cv41nozBTTIw1y07')
 console.log('Newsletter ID:', inviteMeta.id, inviteMeta.name)
 
 const subscribed = await sock.newsletterSubscribed()
