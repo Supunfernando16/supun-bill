@@ -2,6 +2,8 @@
 
 <img src="https://capsule-render.vercel.app/api?type=waving&height=220&color=0:ff6b6b,40:f06595,100:845ef7&text=@mr-supun-fernando/supunmd-bail&fontAlignY=40&fontSize=44&fontColor=ffffff&desc=Stable%20WhatsApp%20Web%20API%20Fork%20for%20Production%20Bots&descAlignY=60&descSize=16" alt="Header Banner" />
 
+<img src="https://i.ibb.co/KjfHTDhN/file-00000000a86881f8801b23682cb9bf66.png" alt="WhatsApp Baileys Supunmd" width="100%" />
+
 [![npm version](https://badge.fury.io/js/@mr-supun-fernando/supunmd-bail.svg)](https://badge.fury.io/js/@mr-supun-fernando/supunmd-bail)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/node/v/@mr-supun-fernando/supunmd-bail.svg)](https://nodejs.org/)
