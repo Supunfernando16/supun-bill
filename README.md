@@ -7,7 +7,7 @@
 <!-- Rounded + border image -->
 <a href="https://supunofc.site">
   <kbd>
-    <img src="https://images.weserv.nl/?url=raw.githubusercontent.com/Supunfernando16/supun-bill/main/assets/banner.png&w=1000&mask=roundrect" alt="WhatsApp Baileys 2026" width="720" />
+    <img src="https://i.ibb.co/KjfHTDhN/file-00000000a86881f8801b23682cb9bf66.png" alt="WhatsApp Baileys 2026" width="720" />
   </kbd>
 </a>
 
